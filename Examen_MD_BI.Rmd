@@ -1,0 +1,333 @@
+---
+title: "Examen Minería de Datos"
+author: "Segundo Bimestre"
+date: "01 de marzo de 2021"
+output:
+  html_document:
+    df_print: paged
+  toc: yes
+  bookdown::html_document2: null
+  pdf_document: default
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Apellidos**: Amagua Obando
+  
+**Nombre**: Luis Fabian
+  
+# Contexto del problema
+Con el objetivo de mejorar los tiempos de atención al cliente en ventanilla de un Banco, se ha recolectado información anónimamente de cada cajero y transacción realizada. Para el estudio, el Banco ha suministrado un archivo de excel con tres hojas:
+
++ Sucursal: tiene información de las transacciones, columnas: Sucursal, Cajero, ID Transacción, Transacción, Tiempo Servicio seg, Nivel de satisfacción, Monto de la transacción.
++ Data_Sucursal: información referente a la ubicación y si en la sucursal se ha puesto o no un nuevo sistema.
++ Data_Cajero: información referente a datos del cajero.
+
+Nota: Es necesario tener presente los tipos de datos que tenemos en el archivo de excel, para cada una de las hojas. Por ejemplo, en la hoja Sucursal: La variable Sucursal, debe ser considerada como una variable categórica nominal (en R se considera a las variables categóricas como factores); Cajero: La variable Cajero, es una variable categórica nominal; IDTransaccion: La variable IDTransaccion,es una variable categórica nominal; Transaccion: La variable Transaccion, es una variable categórica nominal; TiempoServicioseg: La variable TiempoServicioseg, es una variable numérica; Satisfaccion: La variable Satisfaccion, es una variable categórica ordinal; Monto: La variable Monto, es una variable numérica.
+
+```{r include=FALSE}
+#librerias
+library(tidyverse)
+library(lubridate)
+library(nortest)
+library(outliers)
+library(dbscan)
+library(FNN)
+library(rpart)
+library(dplyr)
+library(readr)
+library(kamila)
+library(klaR)
+library(ClustOfVar)
+library(dplyr)
+library(PerformanceAnalytics)
+library(ggplot2)
+library(Hmisc)
+library(corrplot)
+library(openxlsx)
+library(magrittr)
+```
+
+__Cambiamos los tipos de datos __
+```{r}
+
+# Leer el archivo de excel 
+data_banco <- read.xlsx(xlsxFile = "Data/Data_Banco.xlsx", sheet = "Sucursal")
+data_sucursal <- read.xlsx(xlsxFile = "Data/Data_Banco.xlsx", sheet = "Data_Sucursal")
+data_cajero <- read.xlsx(xlsxFile = "Data/Data_Banco.xlsx", sheet = "Data_Cajero")
+
+#vemos el tipo de dato de la data_banco
+
+str(data_banco)
+data_banco <- data_banco %>% mutate(Monto = str_replace(Monto, pattern = ",", replacement = ".")) %>% 
+    mutate(Sucursal = as.character(Sucursal), Cajero = as.character(Cajero), Satisfaccion = parse_factor(Satisfaccion, 
+        levels = c("Muy Malo", "Malo", "Regular", "Bueno", "Muy Bueno"), ordered = T), 
+        Monto = parse_number(Monto, locale = locale(decimal_mark = ".")))
+
+
+```
+Vamos a unir data_banco y data_sucursal, con la funcion inner join
+
+```{r}
+
+str(data_banco)
+str(data_sucursal)
+# debemos tener el mismo tipo de datos
+data_sucursal <- data_sucursal %>% mutate(ID_Sucursal = as.character(ID_Sucursal))
+
+# cambio el nombre de la variable sucursal por ID_sucursal de data_banco y le unimos a la data_sucursal
+data_banco <- data_banco %>% rename(ID_Sucursal = "Sucursal") %>% left_join(data_sucursal, 
+    by = c("ID_Sucursal"))
+str(data_banco)
+
+
+
+```
+
+
+# Enunciado del problema: 
+Determinar la tipología de las transacciones a través del uso de métodos de clasificación, además dentro de cada clase realizar el perﬁlamiento de los cajeros que tiene el banco para la clase. Debido a la cantidad de transacciones, se recomienda realizar una caracterización (puede ser en función del volumen, monto, tiempo, etc.) que mínimo este consituida por tres clases. Para la caracterización puede utilizar un índice (componentes princiales) que permita realizar un ranking y definir las clases.
+
+Una vez, que se tenga creada las clases utilizar la metodología de machine learning para validar y seleccionar un modelo que mejor clasifique la caracterización realizada.
+
+Por otro lado, como bono de un punto para cada clase puede aplicar un método de clustering para descubir la tipología de los cajeros en función del nivel de satisfacción evaluado por el cliente, considerando los tiempos de servicio que dependen del tipo de transacción. Además, de otras características que considere que puedan describir el perfil del cajero.
+
+## 1.- (40%) Caracterización de las transacciones.
+
+__Determine almenos 3 clases que permitan caracterizar las transacciones con el objetivo de evaluar y mejorar los tiempos de atención.__
+
+
+Vamos agrupar por kmeans
+```{r}
+# Consideremos la data solo con las varaiblaes numericas
+library(PCAmixdata)
+library(cluster)
+library(factoextra)
+#tomamos los datos numericos
+data_num<-data.frame(data_banco$Monto, data_banco$Tiempo_Servicio_seg)
+# Asignación de semilla para resultados reproducibles
+
+```
+## Numero Optimo de Cluster para los datos 
+```{r}
+library(factoextra)
+library(NbClust)
+library(caret)
+
+#tomamos una muestra por la gran cantidad de datos, si tomamos todos los datos el tiempo de ejeccion es muy grande , ademas nos dice que no se crea un vector de 2.2 GB
+muestra<- sample(1:nrow(data_num),size=10000,replace=FALSE)
+muestra2<- data_num[muestra, ]
+
+fviz_nbclust(x = muestra2, FUNcluster = kmeans, method = "wss", k.max = 10) +
+   labs(title = "Número óptimo de clusters")
+
+
+```
+Vamos tomar 3 grupos para la clasificacion.
+
+```{r}
+set.seed(2)
+
+km.res <- kmeans(data_num, 3, nstart = 25)
+fviz_cluster(km.res, data = data_num, frame.type = "convex")
+
+```
+Se han considerado estos tres clusters de colores: verde, azul y rojo.
+
++ grupo1: se encuentran transacciones de menor monto y menor tiempo de servicio
+
++ grupo2: se encuentran transacciones de monto alto y alto tiempo de servicio medio
+
++ grupo3: se encuentran transacciones monto medio y mediano tiempo de servicio
+
+
+observems que en el cluster2 existe presencia de datos atipicos.
+
+Ademas podemos ver la cantdad de observaciones en cada uno de los grupos:
+
+```{r, echo=FALSE}
+tipo<-as.data.frame( km.res$cluster)
+cluster2<-data.frame(data_num,tipo)
+barplot(table(tipo))
+
+```
+
+
+Ahora vamos a considerar  imputacion de los valores de la variable monto en cada transaccion usando el metodo LOF.
+
+```{r}
+#estandarizacion
+sucursal_scale<-scale(cluster2$data_banco.Monto)
+
+#tomamos un k=20
+sucursal_lof <- lof(sucursal_scale, k=20)
+
+#CON EL METODO LOF CONSEGUIMOS EL INDICADOR 
+sucursal_lof<-as.data.frame(sucursal_lof)
+
+# TENEMOS LA BASE CON SU INDICADOR DE ATIPICO O NO
+atipicos<-data.frame(cluster2,sucursal_lof)
+
+# sin atipicos
+# metodo LOF: si son menores o iguales a uno es menos probable de que sean datos anomalos
+sn_atipicos<-filter(atipicos,sucursal_lof<=1)
+```
+
+
+vemos si se eliminaron los atipicos
+
+
+
+```{r}
+
+par(mfrow=c(1,2))
+boxplot(cluster2$data_banco.Monto,xlab = "data")
+boxplot(sn_atipicos$data_banco.Monto,xlab = "data sin atipicos")
+```
+
+vemos que los atipicos se han eliminado.
+
+Ahora, sin atipicos tenemos:
+
+
+```{r}
+barplot(table(sn_atipicos$km.res.cluster))
+
+```
+
+`
+
+
+
+
+
+    
+## 2.- (60%) Modelo de predicción, validación y selección del modelo.
+__Realizar un informe que solvente la selección y aplicación del modelo utilizado para la clasificación de las transacciones según las clases definidas con el objetivo de mejorar los tiempos de atención.__
+          
+### 2.1.- (30%) Proponer y Aplicar modelos propuestos para la clasificación.
+
+
+
+## Naive Bayes
+
+```{r}
+library(e1071)
+n_bayes <- naiveBayes(factor(sn_atipicos$km.res.cluster) ~ ., data = sn_atipicos)
+table(predict(n_bayes, sn_atipicos), sn_atipicos[,3])
+
+
+```
+Tenemos un alto porcentaje de clasificacion por este método
+
++ en el grupo1: 3092 bien clasificados y 168 mal clasificados
++ en el grupo2: 1418 bien clasificados y 113 mal clasificados
++ en el grupo3: 4922 bien clasificados y 264 mal clasificados
+
+
+## Analisis Discriminate 
+
+```{r}
+a_discri=lda(factor(sn_atipicos$km.res.cluster)~sn_atipicos$data_banco.Monto+sn_atipicos$data_banco.Tiempo_Servicio_seg,sn_atipicos)
+
+probs=predict(a_discri,sn_atipicos,type="prob")
+table(probs$class,factor(sn_atipicos$km.res.cluster))
+
+
+```
+Tenemos un alto porcentaje de clasificacion por este método
+
++ en el grupo1: 2959 bien clasificados y 2 mal clasificados
++ en el grupo2: 1315 bien clasificados y 8 mal clasificados
++ en el grupo3: 5187 bien clasificados y 329 mal clasificados
+
+## Algorítmo K-vecinos más cercanos
+```{r}
+# Selección muestra entrenamiento
+train=sample(seq(length(sn_atipicos$km.res.cluster)),length(sn_atipicos$km.res.cluster)*0.70,replace=FALSE)
+# K-Nearest Neighbors
+knn.prd=knn(sn_atipicos[train,],sn_atipicos[-train,],sn_atipicos$km.res.cluster[train],k=3,prob=TRUE)
+table(knn.prd,sn_atipicos$km.res.cluster[-train])
+```
+
+```{r}
+mean(knn.prd==sn_atipicos$km.res.cluster[-train])
+```
+#  Redes Neuronales
+
+```{r}
+library(VIM)
+# Obtenermos el TRAIN y el TEST
+library(caret)
+set.seed(111)
+particion = createDataPartition(y=sn_atipicos$km.res.cluster,p=0.7,list = F, times = 1) ## 70%
+# Verificación de los tamaños del TRAIN y TEST
+train = sn_atipicos[particion,]
+
+test = sn_atipicos[-particion,]
+
+
+```
+```{r}
+# Creamos el modelo de árbol
+
+library(rpart)
+set.seed(222)
+modelo = rpart(km.res.cluster~.,data = train,method = "class",minsplit=0)
+# Realizamos la grafica del arbol
+library(partykit)
+plot(as.party(modelo))
+
+predichos = predict(modelo,test,type = "class")
+predichos = as.factor(predichos)
+
+```
+
+
+```{r}
+# Obtenemos los indicadores de nuestro modelo
+
+library(caret)
+
+indicadores = confusionMatrix(as.factor(predichos),as.factor(test$km.res.cluster) )
+indicadores
+```
+Tenemos un alto porcentaje de clasificacion por este método
+
++ en el grupo1: 952 bien clasificados y 0 mal clasificados
++ en el grupo2: 497 bien clasificados y 1 mal clasificados
++ en el grupo3: 1530 bien clasificados y 16 mal clasificados
+
+__PARA ANALIZAR EL PERFIL DEL CAJERO__
+
+Vamos a creamos una variable peso para crear un indicador de la variable Satisfacción. En esta variable satisfacción asignaremos un puntaje a las calificaciónes.
+
+```{r}
+data_banco <- data_banco %>%  mutate(Peso=case_when(
+  Satisfaccion == 'Muy Bueno' ~ 5,
+  Satisfaccion == 'Bueno'~ 4,
+  Satisfaccion == 'Regular' ~ 3,
+  Satisfaccion == 'Malo'~2,
+  Satisfaccion == 'Muy Malo'~1))
+```
+
+# ACP para los cajeros
+
+
+
+
+### 2.2.- (30%) Análisis y conclusiones (validación y selección del modelo).
+
+__Observación: para el desarrollo del examen pueden utilizar cualquier software, sin embargo se recomienda utilizar el software estadístico R (subir un proyecto comprimido con el nombre del estudiante al aula virtual o mail miguel.flores@epn.edu.ec). En el caso que no se pueda reproducir los resultados se calificará la parte práctica con la nota de cero.__
+
+Respecto a los metodos de clasificacion que hemos usado tenemos que:
+
++ Naivy Bayes: clasifica bien el 94,54% 
++ Analisis de discriminate: clasifica bien el 96.54% 
++ KNN; clasifica bien el 99.69%
++ Redes Neuronales: Clasifica bien el 99.53%
+
+Por lo tanto de estos tres metodos, el que K-vecinos más cercanos e clasifica de mejor forma. 
+
